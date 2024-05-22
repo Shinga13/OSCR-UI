@@ -1,16 +1,21 @@
-
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QWidget, QTableView, QFrame, QLabel
-from pyqtgraph import PlotWidget, BarGraphItem, setConfigOptions, mkBrush, mkPen
-import numpy as np
 from typing import Callable, Iterable
 
-from .datamodels import TableModel, SortingProxy
-from .widgetbuilder import SMPIXEL, RFIXED, SMINMIN, AVCENTER, ACENTER, create_frame, create_label
+import numpy as np
+from pyqtgraph import BarGraphItem, mkPen, PlotWidget, setConfigOptions
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QTableView, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, Slot
+
+from OSCR import TABLE_HEADER
+from OSCR.combat import Combat
+
+from .datamodels import OverviewTableModel, SortingProxy
+from .widgetbuilder import ACENTER, AVCENTER, SMINMIN, SMIXMAX
+from .widgetbuilder import create_frame, create_label, style_table
 from .widgets import CustomPlotAxis
-from .style import get_style_class, get_style, theme_font
+from .style import get_style, theme_font
 
 setConfigOptions(antialias=True)
+
 
 def setup_plot(plot_function: Callable) -> Callable:
     '''
@@ -45,42 +50,73 @@ def setup_plot(plot_function: Callable) -> Callable:
         if legend_data is not None:
             legend_frame = create_legend(self, legend_data)
             inner_layout.addWidget(legend_frame, alignment=ACENTER)
-        frame = create_frame(self, None, 'plot_widget')
-        frame.setSizePolicy(SMINMIN)
+        frame = create_frame(self, None, 'plot_widget', size_policy=SMINMIN)
         frame.setLayout(inner_layout)
         outer_layout = QVBoxLayout()
         outer_layout.setContentsMargins(0, 0, 0, 0)
-        outer_layout.addWidget(frame, stretch=11) # if stretch ever needs to be variable, create argument for decorator
+        outer_layout.addWidget(frame)
         return outer_layout
     return plot_wrapper
+
+
+def extract_overview_data(combat: Combat) -> tuple:
+    '''
+    converts dictionary containing player data to table data for the front page
+    '''
+    table = list()
+
+    DPS_graph_data = dict()
+    DMG_graph_data = dict()
+    graph_time = dict()
+
+    for player in combat.player_dict.values():
+        table.append((*player,))
+
+        DPS_graph_data[player.handle] = player.DPS_graph_data
+        DMG_graph_data[player.handle] = player.DMG_graph_data
+        graph_time[player.handle] = player.graph_time
+    table.sort(key=lambda x: x[0])
+    return (graph_time, DPS_graph_data, DMG_graph_data, table)
+
 
 def create_overview(self):
     """
     creates the main Parse Overview including graphs and table
     """
     # clear graph frames
-    for frame in self.widgets['overview_tab_frames']:
+    for frame in self.widgets.overview_tab_frames:
         if frame.layout():
             QWidget().setLayout(frame.layout())
+    if self.widgets.overview_table_frame.layout():
+        QWidget().setLayout(self.widgets.overview_table_frame.layout())
 
-    time_data, DPS_graph_data, DMG_graph_data = self.parser1.active_combat.graph_data
-    current_table = self.parser1.active_combat.table
+    time_data, DPS_graph_data, DMG_graph_data, current_table = extract_overview_data(
+            self.parser1.active_combat)
 
     line_layout = create_line_graph(self, DPS_graph_data, time_data)
-    self.widgets['overview_tab_frames'][1].setLayout(line_layout)
+    self.widgets.overview_tab_frames[1].setLayout(line_layout)
 
     group_bar_layout = create_grouped_bar_plot(self, DMG_graph_data, time_data)
-    self.widgets['overview_tab_frames'][2].setLayout(group_bar_layout)
+    self.widgets.overview_tab_frames[2].setLayout(group_bar_layout)
 
     bar_layout = create_horizontal_bar_graph(self, current_table)
-    self.widgets['overview_tab_frames'][0].setLayout(bar_layout)
+    self.widgets.overview_tab_frames[0].setLayout(bar_layout)
 
-    tbl = create_overview_table(self)
-    bar_layout.addWidget(tbl, stretch=4)
+    table_layout = QVBoxLayout()
+    table_layout.setContentsMargins(0, 0, 0, 0)
+    table = create_overview_table(self, current_table)
+    table_layout.addWidget(table)
+    self.widgets.overview_table_frame.setLayout(table_layout)
+    table.resizeColumnsToContents()
+    horizontal_header = table.horizontalHeader()
+    for col in range(len(TABLE_HEADER)):
+        horizontal_header.resizeSection(col, horizontal_header.sectionSize(col) + 5)
+
 
 @setup_plot
-def create_grouped_bar_plot(self, data: dict[str, tuple], time_reference: dict[str, tuple], 
-            bar_widget: PlotWidget) -> QVBoxLayout:
+def create_grouped_bar_plot(
+        self, data: dict[str, tuple], time_reference: dict[str, tuple],
+        bar_widget: PlotWidget) -> QVBoxLayout:
     """
     Creates a bar plot with grouped bars.
 
@@ -97,19 +133,23 @@ def create_grouped_bar_plot(self, data: dict[str, tuple], time_reference: dict[s
 
     group_width = 0.18
     player_num = len(data)
+    if player_num == 0:
+        return
     bar_width = group_width / player_num
-    relative_bar_positions = np.linspace(0+bar_width/2, group_width-bar_width/2, player_num)
+    relative_bar_positions = np.linspace(0 + bar_width / 2, group_width - bar_width / 2, player_num)
     bar_position_offsets = relative_bar_positions - np.median(relative_bar_positions)
 
     zipper = zip(data.items(), self.theme['plot']['color_cycler'], bar_position_offsets)
     for (player, graph_data), color, offset in zipper:
         if player in time_reference:
             time_data = np.subtract(time_reference[player], offset)
-            bars = BarGraphItem(x=time_data, width=bar_width, height=graph_data, brush=color, pen=None, 
+            bars = BarGraphItem(
+                    x=time_data, width=bar_width, height=graph_data, brush=color, pen=None,
                     name=player)
             bar_widget.addItem(bars)
             legend_data.append((color, player))
     return legend_data
+
 
 @setup_plot
 def create_horizontal_bar_graph(self, table: list[list], bar_widget: PlotWidget) -> QVBoxLayout:
@@ -126,19 +166,23 @@ def create_horizontal_bar_graph(self, table: list[list], bar_widget: PlotWidget)
     left_axis.setTickFont(theme_font(self, 'app'))
     bar_widget.setDefaultPadding(padding=0.01)
 
-    y_annotations = (tuple((index+1, line[0]+line[1]) for index, line in enumerate(table)),)
+    table.sort(key=lambda line: line[3], reverse=True)
+    y_annotations = (tuple((index + 1, line[0] + line[1]) for index, line in enumerate(table)),)
     bar_widget.getAxis('left').setTicks(y_annotations)
     x = tuple(line[3] for line in table)
     y = tuple(range(1, len(x) + 1))
     bar_widget.setXRange(0, max(x) * 1.05, padding=0)
-    bars = BarGraphItem(x0=0, y=y, height=0.75, width=x, brush=self.theme['defaults']['mfg'], pen=None)
+    bars = BarGraphItem(
+            x0=0, y=y, height=0.75, width=x, brush=self.theme['defaults']['mfg'], pen=None)
     bar_widget.addItem(bars)
 
+
 @setup_plot
-def create_line_graph(self, data: dict[str, tuple], time_reference: dict[str, tuple], 
-            graph_widget: PlotWidget) -> QVBoxLayout:
+def create_line_graph(
+        self, data: dict[str, tuple], time_reference: dict[str, tuple],
+        graph_widget: PlotWidget) -> QVBoxLayout:
     """
-    Creates line plot from data and returns layout that countins the plot. 
+    Creates line plot from data and returns layout that countins the plot.
 
     Parameters:
     - :param data: dictionary containing the data to be plotted
@@ -158,12 +202,13 @@ def create_line_graph(self, data: dict[str, tuple], time_reference: dict[str, tu
             legend_data.append((color, player))
     return legend_data
 
+
 def create_legend(self, colors_and_names: Iterable[tuple]) -> QFrame:
     """
     Creates Legend from color / name pairs and returns frame containing it.
 
     Parameters:
-    - :param colors_and_names: Iterable containing color / name pairs : [('#9f9f00', 'Line 1'), 
+    - :param colors_and_names: Iterable containing color / name pairs : [('#9f9f00', 'Line 1'),
     ('#0000ff', 'Line 2'), (...), ...]
 
     :return: frame containing the legend
@@ -198,7 +243,6 @@ def create_legend(self, colors_and_names: Iterable[tuple]) -> QFrame:
     return frame
 
 
-
 def create_legend_item(self, color: str, name: str) -> QFrame:
     """
     Creates a colored patch next to a label inside a frame
@@ -216,38 +260,134 @@ def create_legend_item(self, color: str, name: str) -> QFrame:
     colored_patch = QLabel()
     colored_patch.setStyleSheet(get_style(self, 'plot_legend', {'background-color': color}))
     patch_height = self.theme['app']['frame_thickness']
-    colored_patch.setFixedSize(2*patch_height, patch_height)
+    colored_patch.setFixedSize(2 * patch_height, patch_height)
     layout.addWidget(colored_patch, alignment=AVCENTER)
-    label = create_label(self, name, 'label', style_override={'font': self.theme['plot_legend']['font']})
+    label = create_label(
+            self, name, 'label', style_override={'font': self.theme['plot_legend']['font']})
     layout.addWidget(label)
     frame.setLayout(layout)
     return frame
 
-def create_overview_table(self) -> QTableView:
+
+def create_overview_table(self, table_data) -> QTableView:
     """
     Creates the overview table and returns it.
 
     :return: Overview Table
     """
-    model = TableModel(self.parser1.active_combat.table,
-            header_font=self.theme_font('table_header'), cell_font=self.theme_font('table'))
+    table_cell_data = tuple(tuple(line[2:]) for line in table_data)
+    table_index = tuple(line[0] + line[1] for line in table_data)
+    model = OverviewTableModel(
+            table_cell_data, TABLE_HEADER, table_index, self.theme_font('table_header'),
+            self.theme_font('table'))
     sort = SortingProxy()
     sort.setSourceModel(model)
-    table = QTableView(self.widgets['overview_tab_frames'][0])
-    table.setAlternatingRowColors(self.theme['s.c']['table_alternate'])
-    table.setShowGrid(self.theme['s.c']['table_gridline'])
-    table.setSortingEnabled(True)
+    table = QTableView(self.widgets.overview_tab_frames[0])
     table.setModel(sort)
-    table.setStyleSheet(get_style_class(self, 'QTableView', 'table'))
-    table.setHorizontalScrollMode(SMPIXEL)
-    table.setVerticalScrollMode(SMPIXEL)
-    table.horizontalHeader().setStyleSheet(get_style_class(self, 'QHeaderView', 'table_header'))
-    table.verticalHeader().setStyleSheet(get_style_class(self, 'QHeaderView', 'table_index'))
-    table.resizeColumnsToContents()
-    for col in range(len(model._header)):
-        table.horizontalHeader().resizeSection(col, table.horizontalHeader().sectionSize(col) + 5)
-    table.resizeRowsToContents()
-    table.horizontalHeader().setSectionResizeMode(RFIXED)
-    table.verticalHeader().setSectionResizeMode(RFIXED)
-    table.setSizePolicy(SMINMIN)
+    style_table(self, table)
+    if self.settings.value('overview_sort_order') == 'Descending':
+        sort_order = Qt.SortOrder.AscendingOrder
+    else:
+        sort_order = Qt.SortOrder.DescendingOrder
+    table.sortByColumn(self.settings.value('overview_sort_column', type=int), sort_order)
     return table
+
+
+def create_live_graph(self) -> tuple[QFrame, list]:
+    """
+    Creates and styles live graph.
+
+    :return: Frame containing the graph and list of curves that will be used to plot the data
+    """
+    plot_widget = PlotWidget()
+    plot_widget.setAxisItems({'left': CustomPlotAxis('left')})
+    plot_widget.setAxisItems({'bottom': CustomPlotAxis('bottom', unit='s', no_labels=True)})
+    plot_widget.setStyleSheet(get_style(self, 'plot_widget_nullifier'))
+    plot_widget.setBackground(None)
+    plot_widget.setMouseEnabled(False, False)
+    plot_widget.setMenuEnabled(False)
+    plot_widget.hideButtons()
+    plot_widget.setDefaultPadding(padding=0)
+    plot_widget.setXRange(-14, 0, padding=0)
+    left_axis = plot_widget.getAxis('left')
+    left_axis.setTickFont(theme_font(self, 'live_plot_widget'))
+    left_axis.setTextPen(color=self.theme['defaults']['fg'])
+    # left_axis.setTickDensity(0.1)
+    bottom_axis = plot_widget.getAxis('bottom')
+    bottom_axis.setTickFont(theme_font(self, 'plot_widget'))
+    bottom_axis.setTextPen(color=self.theme['defaults']['fg'])
+
+    curves = list()
+    for color_index in range(5):
+        color = self.theme['plot']['color_cycler'][color_index]
+        curves.append(plot_widget.plot([0], [0], pen=mkPen(color, width=1)))
+
+    frame = create_frame(self, None, 'plot_widget', size_policy=SMIXMAX, style_override={
+            'margin': 4, 'padding': 2})
+    frame.setMinimumWidth(self.sidebar_item_width * 0.25)
+    frame.setMinimumHeight(self.sidebar_item_width * 0.25)
+    layout = QHBoxLayout()
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.addWidget(plot_widget, stretch=1)
+    frame.setLayout(layout)
+    return frame, curves
+
+
+def update_live_display(
+        self, data: dict, graph_active: bool = False, graph_data_buffer: list = [],
+        graph_data_field: int = 0):
+    """
+    Updates display of live parser to show the new data.
+
+    Parameters:
+    - :param data: dictionary containing the new data
+    - :param graph_active: Set to True to update the graph as well
+    - :param graph_data_buffer: contains the past graph data
+    """
+    index = list()
+    cells = list()
+    curves = list()
+    for player, player_data in data.items():
+        index.append(player)
+        cells.append(list(player_data.values()))
+    if graph_active:
+        if len(graph_data_buffer) == 0:
+            graph_data_buffer.extend(([0] * 15, [0] * 15, [0] * 15, [0] * 15, [0] * 15))
+        zipper = zip(graph_data_buffer, cells, self.widgets.live_parser_curves)
+        for buffer_item, player_data, curve in zipper:
+            buffer_item.pop(0)
+            buffer_item.append(player_data[graph_data_field])
+            curves.append((curve, buffer_item))
+        if len(curves) > 0:
+            self.live_parser_window.update_graph.emit(curves)
+
+    if len(index) > 0 and len(cells) > 0:
+        self.live_parser_window.update_table.emit((index, cells))
+
+
+@Slot()
+def update_live_table(self, data: tuple):
+    """
+    Updates the table of the live parser with the supplied data
+
+    Parameters:
+    - :param data: tuple containing two lists, that contain the index and cell values respectively
+    """
+    table = self.widgets.live_parser_table
+    table.model().replace_data(*data)
+    table.resizeColumnsToContents()
+    table.resizeRowsToContents()
+
+
+@Slot()
+def update_live_graph(curve_data: list):
+    """
+    Updates the graph of the live parser with the supplied data
+
+    Parameters:
+    - :param curve_data: list containing pairs of curve items and data lists; curve items will be
+    updated with the data
+    """
+    time_data = list(range(-14, 1))
+    for curve, data_points in curve_data:
+        curve.setData(time_data, data_points)

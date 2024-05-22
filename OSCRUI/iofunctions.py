@@ -1,36 +1,47 @@
 import json
 import os
 import re
+import shutil
 import sys
+import webbrowser
 
-from PyQt6.QtWidgets import QFileDialog
-from PyQt6.QtGui import QIcon
+from PySide6.QtWidgets import QFileDialog
+from PySide6.QtGui import QIcon
 
+# --------------------------------------------------------------------------------------------------
 # object methods
+# --------------------------------------------------------------------------------------------------
 
-def browse_path(self, default_path: str = None, types: str = 'Any File (*.*)') -> str:
+
+def browse_path(self, default_path: str = None, types: str = 'Any File (*.*)', save=False) -> str:
     """
     Opens file dialog prompting the user to select a file.
 
     Parameters:
     - :param default_path: path that the file dialog opens at
-    - :param types: string containing all file extensions and their respective names that are allowed.
+    - :param types: string containing all file extensions and their respective names that are
+    allowed.
     Format: "<name of file type> (*.<extension>);;<name of file type> (*.<extension>);; [...]"
     Example: "Logfile (*.log);;Any File (*.*)"
     """
-    if default_path is None:
-        default_path = self.settings.value('base_path')
+    if default_path is None or default_path == '':
+        default_path = self.app_dir
     default_path = os.path.abspath(default_path)
     if not os.path.exists(default_path):
-        default_path = self.settings.value('base_path')
-    f = QFileDialog.getOpenFileName(self.window, 'Open Log', default_path, types)[0]
-    if os.path.exists(f):
-        return f
+        default_path = self.app_dir
+    if save:
+        f = QFileDialog.getSaveFileName(self.window, 'Save Log', default_path, types)[0]
     else:
-        return ''
-    
+        f = QFileDialog.getOpenFileName(self.window, 'Open Log', default_path, types)[0]
+        if not os.path.exists(f):
+            return ''
+    return f
+
+# --------------------------------------------------------------------------------------------------
 # static functions
-    
+# --------------------------------------------------------------------------------------------------
+
+
 def get_asset_path(asset_name: str, app_directory: str) -> str:
     """
     returns the absolute path to a file in the asset folder
@@ -45,6 +56,7 @@ def get_asset_path(asset_name: str, app_directory: str) -> str:
     else:
         return ''
 
+
 def load_icon(filename: str, app_directory: str) -> QIcon:
     """
     Loads icon from path and returns it.
@@ -54,6 +66,7 @@ def load_icon(filename: str, app_directory: str) -> QIcon:
     - :param app_directory: absolute path to the app directory
     """
     return QIcon(get_asset_path(filename, app_directory))
+
 
 def load_icon_series(icons: dict, app_directory: str) -> dict[str, QIcon]:
     """
@@ -71,6 +84,15 @@ def load_icon_series(icons: dict, app_directory: str) -> dict[str, QIcon]:
         icon_dict[icon_name] = QIcon(os.path.join(asset_path, file_name))
     return icon_dict
 
+
+def open_link(link: str = ''):
+    """
+    Opens provided link
+    """
+    if link:
+        webbrowser.open(link, new=2, autoraise=True)
+
+
 def fetch_json(path: str) -> dict | list:
     """
     Fetches json from path and returns dictionary.
@@ -83,6 +105,7 @@ def fetch_json(path: str) -> dict | list:
     with open(path, 'r', encoding='utf-8') as file:
         data = json.load(file)
     return data
+
 
 def store_json(data: dict | list, path: str):
     """
@@ -100,12 +123,25 @@ def store_json(data: dict | list, path: str):
     except OSError as e:
         sys.stdout.write(f'[Error] Data could not be saved: {e}')
 
+
+def reset_temp_folder(path: str):
+    '''
+    Deletes and re-creates folder housing temporary log files.
+    '''
+    if os.path.exists(path):
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        else:
+            raise FileExistsError(f'Expected path to folder, got "{path}"')
+    os.mkdir(path)
+
+
 def sanitize_file_name(txt, chr_set='extended') -> str:
     """Converts txt to a valid filename.
 
     Parameters:
     - :param txt: The path to convert.
-    - :param chr_set: 
+    - :param chr_set:
         - 'printable':    Any printable character except those disallowed on Windows/*nix.
         - 'extended':     'printable' + extended ASCII character codes 128-255
         - 'universal':    For almost *any* file system.
@@ -118,15 +154,16 @@ def sanitize_file_name(txt, chr_set='extended') -> str:
     white_lists = {
         'universal': {'-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'},
         'printable': {chr(x) for x in range(32, 127)} - BLACK_LIST,     # 0-32, 127 are unprintable,
-        'extended' : {chr(x) for x in range(32, 256)} - BLACK_LIST,
+        'extended': {chr(x) for x in range(32, 256)} - BLACK_LIST,
     }
     white_list = white_lists[chr_set]
     result = ''.join(x if x in white_list else FILLER for x in txt)
 
     # Step 2: Device names, '.', and '..' are invalid filenames in Windows.
-    DEVICE_NAMES = ('CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7',
-            'COM8', 'COM9', 'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9', 'CONIN$',
-            'CONOUT$', '..', '.')
+    DEVICE_NAMES = (
+            'CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7',
+            'COM8', 'COM9', 'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9',
+            'CONIN$', 'CONOUT$', '..', '.')
     if '.' in txt:
         name, _, ext = result.rpartition('.')
         ext = f'.{ext}'
