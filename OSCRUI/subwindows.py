@@ -219,7 +219,7 @@ def uploadresult_dialog(self, result):
         else:
             table_style = {'background-color': '@bg', 'padding': (5, 3, 3, 3), 'margin': 0}
             icon_table_style = {'background-color': '@bg', 'padding': (3, 3, 3, 3), 'margin': 0}
-        if line['updated']:
+        if line.updated:
             icon = self.icons['check'].pixmap(icon_size)
         else:
             icon = self.icons['dash'].pixmap(icon_size)
@@ -227,14 +227,14 @@ def uploadresult_dialog(self, result):
         status_label.setPixmap(icon)
         status_label.setSizePolicy(SMINMIN)
         content_layout.addWidget(status_label, row, 0)
-        name_label = create_label(self, line['name'], style_override=table_style)
+        name_label = create_label(self, line.name, style_override=table_style)
         name_label.setSizePolicy(SMINMAX)
         content_layout.addWidget(name_label, row, 1)
-        value_label = create_label(self, str(line['value']), style_override=table_style)
+        value_label = create_label(self, str(line.value), style_override=table_style)
         value_label.setSizePolicy(SMINMAX)
         value_label.setAlignment(ARIGHT)
         content_layout.addWidget(value_label, row, 2)
-        detail_label = create_label(self, line['detail'], style_override=table_style)
+        detail_label = create_label(self, line.detail, style_override=table_style)
         detail_label.setSizePolicy(SMINMAX)
         content_layout.addWidget(detail_label, row, 3)
     top_margin = {'margin-top': self.theme['defaults']['isp']}
@@ -289,10 +289,17 @@ def live_parser_toggle(self, activate):
         self.live_parser_window = None
         self.live_parser = None
         self.widgets.live_parser_table = None
+        self.widgets.live_parser_splitter = None
         self.widgets.live_parser_button.setChecked(False)
 
 
 def create_live_parser_window(self):
+    """
+    Creates the LiveParser window.
+    """
+    ui_scale = self.config['ui_scale']
+    self.config['ui_scale'] = self.config['live_scale']
+
     live_window = LiveParserWindow()
     live_window.setStyleSheet(get_style(self, 'live_parser'))
     live_window.setWindowFlags(
@@ -315,9 +322,12 @@ def create_live_parser_window(self):
 
     graph_colors = None
     graph_column = None
-    if self.settings.value('live_graph_active', type=bool):
+    graph_active = self.settings.value('live_graph_active', type=bool)
+    if graph_active:
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.setStyleSheet(get_style_class(self, 'QSplitter', 'splitter'))
+        splitter.setChildrenCollapsible(False)
+        self.widgets.live_parser_splitter = splitter
         graph_frame, curves = create_live_graph(self)
         graph_frame.setMinimumHeight(self.sidebar_item_width * 0.1)
         splitter.addWidget(graph_frame)
@@ -325,10 +335,7 @@ def create_live_parser_window(self):
         FIELD_INDEX_CONVERSION = {0: 0, 1: 2, 2: 3, 3: 4}
         graph_column = FIELD_INDEX_CONVERSION[self.settings.value('live_graph_field', type=int)]
         graph_colors = self.theme['plot']['color_cycler'][:5]
-        table_layout = splitter
         layout.addWidget(splitter, stretch=1)
-    else:
-        table_layout = layout
 
     table = QTableView()
     table.setAlternatingRowColors(self.theme['s.c']['table_alternate'])
@@ -339,8 +346,10 @@ def create_live_parser_window(self):
     table.horizontalHeader().setStyleSheet(
             get_style_class(self, 'QHeaderView', 'live_table_header'))
     table.verticalHeader().setStyleSheet(get_style_class(self, 'QHeaderView', 'live_table_index'))
+    table.verticalHeader().setMinimumHeight(1)
     table.verticalHeader().setDefaultSectionSize(1)
-    table.horizontalHeader().setMinimumHeight(1)
+    table.horizontalHeader().setMinimumWidth(1)
+    table.horizontalHeader().setDefaultSectionSize(1)
     table.horizontalHeader().setSectionResizeMode(RFIXED)
     table.verticalHeader().setSectionResizeMode(RFIXED)
     table.setSizePolicy(SMINMIN)
@@ -358,7 +367,12 @@ def create_live_parser_window(self):
         if not self.settings.value(f'live_columns|{index}', type=bool):
             table.hideColumn(index)
     self.widgets.live_parser_table = table
-    table_layout.addWidget(table)
+    if graph_active:
+        splitter.addWidget(table)
+        if self.settings.value('live_splitter'):
+            splitter.restoreState(self.settings.value('live_splitter'))
+    else:
+        layout.addWidget(table, 1)
 
     bottom_layout = QGridLayout()
     bottom_layout.setContentsMargins(self.theme['defaults']['isp'], 0, 0, 0)
@@ -366,22 +380,20 @@ def create_live_parser_window(self):
     bottom_layout.setColumnStretch(0, 1)
     bottom_layout.setColumnStretch(2, 1)
 
+    icon_size = [self.theme['s.c']['button_icon_size'] * self.config['live_scale'] * 0.8] * 2
     copy_button = copy_button = create_icon_button(
-            self, self.icons['copy'], 'Copy Result', style_override={'margin-bottom': '@margin'},
-            icon_size=[self.config['icon_size'] * 0.8] * 2)
+            self, self.icons['copy'], 'Copy Result', icon_size=icon_size)
     copy_button.clicked.connect(lambda: copy_live_data_callback(self))
     bottom_layout.addWidget(copy_button, 0, 0, alignment=ARIGHT | AVCENTER)
     activate_button = FlipButton('Activate', 'Deactivate', live_window, checkable=True)
     activate_button.setStyleSheet(self.get_style_class(
-            'QPushButton', 'toggle_button', {'margin': (1, 8, 10, 8)}))
+            'QPushButton', 'toggle_button', {'margin': (0, 8, 0, 8)}))
     activate_button.setFont(self.theme_font('app', '@subhead'))
     activate_button.r_function = lambda: self.live_parser.start()
     activate_button.l_function = lambda: self.live_parser.stop()
     bottom_layout.addWidget(activate_button, 0, 1, alignment=AVCENTER)
     close_button = create_icon_button(
-            self, self.icons['close'], 'Close Live Parser',
-            style_override={'margin-bottom': '@margin'},
-            icon_size=[self.config['icon_size'] * 0.8] * 2)
+            self, self.icons['close'], 'Close Live Parser', icon_size=icon_size)
     close_button.clicked.connect(lambda: live_parser_toggle(self, False))
     bottom_layout.addWidget(close_button, 0, 2, alignment=ALEFT | AVCENTER)
 
@@ -394,6 +406,7 @@ def create_live_parser_window(self):
     live_window.update_table.connect(lambda data: update_live_table(self, data))
     live_window.update_graph.connect(update_live_graph)
     self.live_parser_window = live_window
+    self.config['ui_scale'] = ui_scale
     live_window.show()
 
 
@@ -403,6 +416,10 @@ def live_parser_close_callback(self, event):
     """
     window_geometry = self.live_parser_window.saveGeometry()
     self.settings.setValue('live_geometry', window_geometry)
+    try:
+        self.settings.setValue('live_splitter', self.widgets.live_parser_splitter.saveState())
+    except AttributeError:
+        pass
     event.accept()
 
 

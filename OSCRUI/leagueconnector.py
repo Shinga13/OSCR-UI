@@ -3,6 +3,7 @@
 import gzip
 import os
 import tempfile
+import json
 
 import OSCR_django_client
 from OSCR.utilities import logline_to_str
@@ -12,7 +13,7 @@ from PySide6.QtWidgets import QMessageBox
 from .datafunctions import CustomThread, analyze_log_callback
 from .datamodels import LeagueTableModel, SortingProxy
 from .style import theme_font
-from .subwindows import show_warning
+from .subwindows import show_warning, uploadresult_dialog
 from .textedit import format_datetime_str
 
 LADDER_HEADER = (
@@ -38,8 +39,9 @@ def establish_league_connection(self):
     """
     if self.league_api is None:
         self.league_api = OSCRClient()
-        map_fetch_thread = CustomThread(self.window, lambda: fetch_and_insert_maps(self))
-        map_fetch_thread.start()
+        fetch_and_insert_maps(self)
+        # map_fetch_thread = CustomThread(self.window, lambda: fetch_and_insert_maps(self))
+        # map_fetch_thread.start()
 
 
 def fetch_and_insert_maps(self):
@@ -49,12 +51,27 @@ def fetch_and_insert_maps(self):
     ladders = self.league_api.ladders()
     if ladders is not None:
         self.widgets.ladder_selector.clear()
+        ladder_dict = self.league_api.ladder_dict
         for ladder in ladders.results:
-            solo = "[Solo]" if ladder.is_solo else ""
-            variant = f"[{ladder.variant_name}] " if ladder.variant_name != "Default" else ""
-            key = f"{variant}{ladder.name} ({ladder.difficulty}) {solo}"
-            self.league_api.ladder_dict[key] = ladder
-            self.widgets.ladder_selector.addItem(key)
+            solo = " [Solo]" if ladder.is_solo else ""
+            difficulty = f' ({ladder.difficulty})' if ladder.difficulty is not None else ''
+            key = ladder.name + difficulty + solo
+            if ladder.variant not in self.league_api.ladder_dict:
+                ladder_dict[ladder.variant] = dict()
+            ladder_dict[ladder.variant][key] = ladder
+        self.widgets.season_combo.clear()
+        for name in ladder_dict:
+            if name == 'Default':
+                self.widgets.ladder_selector.addItems(ladder_dict['Default'].keys())
+            else:
+                self.widgets.season_combo.addItem(name)
+
+
+def insert_season_maps(self, season_name):
+    """
+    Inserts seasonal maps into season map selector
+    """
+
 
 
 def apply_league_table_filter(self, filter_text: str):
@@ -121,9 +138,9 @@ def slot_ladder(self, selected_map):
     table = self.widgets.ladder_table
     table.setModel(sorting_proxy)
     table.resizeColumnsToContents()
-    table_header = table.horizontalHeader()
-    for col in range(len(model._header)):
-        table_header.resizeSection(col, table_header.sectionSize(col) + 5)
+    # table_header = table.horizontalHeader()
+    # for col in range(len(model._header)):
+    #     table_header.resizeSection(col, table_header.sectionSize(col) + 5)
 
 
 def extend_ladder(self):
@@ -203,7 +220,9 @@ def upload_callback(self):
         )
         file.write(data)
         file.flush()
-    self.league_api.upload(file.name)
+    res = self.league_api.upload(file.name)
+    if res:
+        uploadresult_dialog(self, res)
     os.remove(file.name)
 
 
@@ -213,14 +232,16 @@ class OSCRClient:
 
         # TODO: This is a test domain and not for production.
         if not address:
-            self.address = "http://127.0.0.1:8000"
+            self.address = "https://oscr.stobuilds.com"
 
         self.api_client = OSCR_django_client.api_client.ApiClient()
         self.api_client.configuration.host = self.address
         self.api_combatlog = CombatlogApi(api_client=self.api_client)
         self.api_ladder = LadderApi(api_client=self.api_client)
         self.api_ladder_entries = LadderEntriesApi(api_client=self.api_client)
-        self.ladder_dict: dict = dict()
+        self.ladder_dict: dict = {
+            'Default': dict()
+        }
         self.current_ladder_id = None
         self.pages_loaded: int = -1
         self.entire_ladder_loaded: bool = True
@@ -228,19 +249,17 @@ class OSCRClient:
     def upload(self, filename):
         """Upload a combat log located at path for analysis"""
 
-        reply = QMessageBox()
-        reply.setWindowTitle("Open Source Combatlog Reader")
-
         try:
-            res = self.api_combatlog.combatlog_upload(file=filename)
-            lines = []
-            for entry in res:
-                lines.append(entry.detail)
-            reply.setText("\n".join(lines))
+            return self.api_combatlog.combatlog_upload(file=filename)
         except OSCR_django_client.exceptions.ServiceException as e:
-            reply.setText(str(e))
-
-        reply.exec()
+            reply = QMessageBox()
+            reply.setWindowTitle("Open Source Combatlog Reader")
+            try:
+                data = json.loads(e.body)
+                reply.setText(data.get("detail", "Failed to parse error from server"))
+            except Exception as e:
+                reply.setText("Failed to parse error from server")
+            reply.exec()
 
     def download(self, id):
         """Download a combat log"""
@@ -249,7 +268,11 @@ class OSCRClient:
         except OSCR_django_client.exceptions.ServiceException as e:
             reply = QMessageBox()
             reply.setWindowTitle("Open Source Combatlog Reader")
-            reply.setText(str(e))
+            try:
+                data = json.loads(e.body)
+                reply.setText(data.get("detail", "Failed to parse error from server"))
+            except Exception as e:
+                reply.setText("Failed to parse error from server")
             reply.exec()
 
         return None
@@ -261,7 +284,11 @@ class OSCRClient:
         except OSCR_django_client.exceptions.ServiceException as e:
             reply = QMessageBox()
             reply.setWindowTitle("Open Source Combatlog Reader")
-            reply.setText(str(e))
+            try:
+                data = json.loads(e.body)
+                reply.setText(data.get("detail", "Failed to parse error from server"))
+            except Exception as e:
+                reply.setText("Failed to parse error from server")
             reply.exec()
 
         return None
@@ -278,7 +305,11 @@ class OSCRClient:
         except OSCR_django_client.exceptions.ServiceException as e:
             reply = QMessageBox()
             reply.setWindowTitle("Open Source Combatlog Reader")
-            reply.setText(str(e))
+            try:
+                data = json.loads(e.body)
+                reply.setText(data.get("detail", "Failed to parse error from server"))
+            except Exception as e:
+                reply.setText("Failed to parse error from server")
             reply.exec()
 
         return None

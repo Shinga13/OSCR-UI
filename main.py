@@ -6,8 +6,8 @@ from OSCRUI import OSCRUI
 
 class Launcher():
 
-    version = '2024.05b200'
-    __version__ = '0.1'
+    version = '2024.05b280'
+    __version__ = '0.2'
 
     # holds the style of the app
     theme = {
@@ -484,11 +484,11 @@ class Launcher():
             },
             # down-pointing arrow
             '::branch:open:has-children': {
-                'image': 'url(assets/arrow-down.svg)'
+                'image': 'url(assets/chevron-down.svg)'
             },
             # right-pointing arrow
             '::branch:closed:has-children': {
-                'image': 'url(assets/arrow-right.svg)'
+                'image': 'url(assets/chevron-right.svg)'
             }
         },
         # header of the analysis table; ::section refers to the individual buttons
@@ -521,7 +521,7 @@ class Launcher():
             'color': '@fg',
             'font': '@subhead',
             '::down-arrow': {
-                'image': 'url(assets/fat-arrow-down.svg)',
+                'image': 'url(assets/thick-chevron-down.svg)',
                 'width': '@margin',
             },
             '::drop-down': {
@@ -666,6 +666,9 @@ class Launcher():
             '::handle': {
                 'background-color': '@oscr'
             },
+            '::handle:pressed': {
+                'background-color': '@bc'
+            },
             '::handle:vertical': {
                 'height': '@bw',
                 'margin': (0, 13, 0, 13)
@@ -694,8 +697,8 @@ class Launcher():
     @staticmethod
     def app_config() -> dict:
         config = {
-            'minimum_window_width': 1280,
-            'minimum_window_height': 1016,
+            'minimum_window_width': 1370,
+            'minimum_window_height': 907,
             'settings_path': r'/.OSCR_settings.ini',
             'templog_folder_path': r'/~temp_log_files',
             'link_website': '',
@@ -705,12 +708,14 @@ class Launcher():
             'link_stocd': 'https://github.com/STOCD',
             'live_graph_fields': ('DPS', 'Debuff', 'Attacks-in Share', 'HPS'),
             'ui_scale': 1,
+            'live_scale': 1,
             'icon_size': 24,
             'default_settings': {
                 'log_path': '',
                 'sto_log_path': '',
                 'geometry': None,
                 'live_geometry': None,
+                'live_splitter': None,
                 'dmg_columns|0': True,
                 'dmg_columns|1': True,
                 'dmg_columns|2': True,
@@ -769,6 +774,7 @@ class Launcher():
                 'first_overview_tab': 0,
                 'log_size_warning': True,
                 'ui_scale': 1,
+                'live_scale': 1,
             }
         }
         return config

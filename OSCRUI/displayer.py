@@ -108,9 +108,6 @@ def create_overview(self):
     table_layout.addWidget(table)
     self.widgets.overview_table_frame.setLayout(table_layout)
     table.resizeColumnsToContents()
-    horizontal_header = table.horizontalHeader()
-    for col in range(len(TABLE_HEADER)):
-        horizontal_header.resizeSection(col, horizontal_header.sectionSize(col) + 5)
 
 
 @setup_plot
@@ -300,7 +297,7 @@ def create_live_graph(self) -> tuple[QFrame, list]:
     :return: Frame containing the graph and list of curves that will be used to plot the data
     """
     plot_widget = PlotWidget()
-    plot_widget.setAxisItems({'left': CustomPlotAxis('left')})
+    plot_widget.setAxisItems({'left': CustomPlotAxis('left', compressed=True)})
     plot_widget.setAxisItems({'bottom': CustomPlotAxis('bottom', unit='s', no_labels=True)})
     plot_widget.setStyleSheet(get_style(self, 'plot_widget_nullifier'))
     plot_widget.setBackground(None)
